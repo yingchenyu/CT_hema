@@ -290,7 +290,7 @@ input a dataset of both masks and iamges
 return a numpy array of cropped images
 '''
 
-def crop_actual_size(dataset, margin=1):
+def crop_actual_size(dataset, margin=5):
     cropped_images = []
     for i, data in enumerate(dataset):
         print(i, 'th')
@@ -307,23 +307,18 @@ def crop_actual_size(dataset, margin=1):
             l = margin
         if(r + margin > masks.shape[1] - 1):
             r = masks.shape[1] - margin - 1
-        if(u - margin < 0):
-            t = margin
-        if(b + margin > masks.shape[2] - 1):
-            b = masks.shape[2] - margin - 1
+        # if(t - margin < 0):
+        #     t = margin
+        # if(b + margin > masks.shape[2] - 1):
+        #     b = masks.shape[2] - margin - 1
 
-        print(u-margin, d+margin, l-margin, r+margin, t-margin, b+margin)
-        cropped_image = images[u-margin:d+margin, l-margin:r+margin, t-margin:b+margin]
+        print(u-margin, d+margin, l-margin, r+margin, t, b)
+        cropped_image = images[u-margin:d+margin, l-margin:r+margin, t:b+1]
         cropped_images.append(cropped_image)
 
     # return np.array(cropped_images)
     return cropped_images
 
-# def pad_cropped(images, dimensions=(60,60,10)):
-#     X, Y, Z = dimensions
-#     for image in images:
-#         x, y, z = image.shape
-#         pad1 =
 
 def crop_images(dataset, dimensions=(60,60,10)):
     X, Y, Z = dimensions
