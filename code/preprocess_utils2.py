@@ -72,18 +72,18 @@ def get_baselines(path):
     for f in folders:
         if 'baseline' in f:
             baselines.append(f)
-            if 'fixed' in f:
-                try:
-                    baselines.remove(f.replace('_fixed',''))
-                    baselines.remove(f)
-                except:
-                    baselines.remove(f)
-    for f in folders:
-        if '24hNCCT_fixed' in f:
-            try:
-                baselines.remove(f.replace('24hNCCT_fixed','baselineNCCT'))
-            except:
-                pass
+    #         if 'fixed' in f:
+    #             try:
+    #                 baselines.remove(f.replace('_fixed',''))
+    #                 baselines.remove(f)
+    #             except:
+    #                 baselines.remove(f)
+    # for f in folders:
+    #     if '24hNCCT_fixed' in f:
+    #         try:
+    #             baselines.remove(f.replace('24hNCCT_fixed','baselineNCCT'))
+    #         except:
+    #             pass
     return baselines
 
 def load_data(path):
@@ -108,10 +108,11 @@ def load_data(path):
     if not label:
         print("No label data detected...")
         return output
-
+    
     for label_name, label_header in hdr_label.items():
         for img_name, img_header in hdr_img.items():
-            if round(label_header['pixdim'][3],1) == round(img_header['pixdim'][3],1) and img[img_name].shape == label[label_name].shape:
+            if img_name not in img_used and round(label_header['pixdim'][3],1) == round(img_header['pixdim'][3],1) \
+            and img[img_name].shape == label[label_name].shape:
                 #To make sure label and img same size, both using img's spacing
                 img_resample = resample(img[img_name], img_header)
                 label_resample = resample(label[label_name], img_header)
@@ -121,6 +122,11 @@ def load_data(path):
                 if output_img1.shape[1] != output_img1.shape[0]:
                     shape_diff = output_img1.shape[1] - output_img1.shape[0]
                     output_img1 = output_img1[:,shape_diff//2:-shape_diff//2,:,:]
+
+                #Special case for Help-gs-078
+                if '20150524193107_HeadTTYY_2' in img_name:
+                    output_img1 = output_img1[:,:,0:(output_img1.shape[2]+1)//2,:]
+
                 if output.size == 0:
                     output = output_img1
                 #To make sure 5mm data is above 10mm
@@ -136,6 +142,10 @@ def load_data(path):
                         output = np.concatenate([output_img1, output], axis = 2)
                     elif img_header['pixdim'][3] == thickness and output_img1.shape[2]!= output.shape[2]:
                         output = np.concatenate([output, output_img1], axis = 2)
+                    #Special Case for HELP-GS223
+                    elif '20170803122409' in img_name:
+                        output = np.concatenate([output, output_img1], axis = 2)
+                    
                 thickness = img_header['pixdim'][3]
                 img_used.append(img_name)
                 print(img_name)
@@ -145,12 +155,16 @@ def load_data(path):
         for img_name, img_header in hdr_img.items():
             if img[img_name].shape[2] > 2 and img_name not in img_used:
                 img_resample = resample(img[img_name], img_header)
-                seg = np.zeros_like(img_resample)
+                seg = np.zeros_like(img_resample) 
                 output_add = np.stack([img_resample, seg],axis=-1)
-                #Crop width to match height
+                #Crop to match the shape
                 if output_add.shape[1] != output_add.shape[0]:
                     shape_diff = output_add.shape[1] - output_add.shape[0]
                     output_add = output_add[:,shape_diff//2:-shape_diff//2,:,:]
+                if (output.shape[0] > output_add.shape[0]):
+                    output = crop_data(output, output.shape[0] - output_add.shape[0])
+                elif (output.shape[0] < output_add.shape[0]):
+                    output_add = crop_data(output_add, output_add.shape[0] - output.shape[0])
 #                 print(output.shape, output_add.shape)
                 if img_header['pixdim'][3] < thickness:
                     output = np.concatenate([output_add, output], axis=2)
@@ -210,13 +224,13 @@ def resize_data(dataset, patients):
     #Pad or Crop to [min_dim,min_dim,18,*]
     for i, data in enumerate(dataset):
         data[data<-1024] = -1024
-        if data.shape[2] > 18:
+        if data.shaspe[2] > 18:
             diff = data.shape[2] - 18
             dataset[i] = data[:,:,:-diff,:]
         elif data.shape[2] < 18:
             diff = 18 - data.shape[2]
             pad = data[:,:,0:diff,:].copy()
-            pad[:,:,:,0], pad[:,:,:,1] = -1024, 0
+            pad[:,:,:,:] = 0
             dataset[i] = np.concatenate([data,pad] ,axis=2)
 
     # for i, data in enumerate(dataset):
