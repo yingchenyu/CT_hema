@@ -85,6 +85,13 @@ def get_baselines(path):
     #         except:
     #             pass
     return baselines
+    
+def crop_data(data, diff):
+    crop_size = diff//2
+    crop = data[crop_size:-crop_size,crop_size:-crop_size,:,:]
+    if diff%2 !=0:
+        crop = crop[0:-1,0:-1,:,:]
+    return crop
 
 def load_data(path):
     output = np.array([])
