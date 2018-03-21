@@ -85,7 +85,7 @@ def get_baselines(path):
     #         except:
     #             pass
     return baselines
-    
+
 def crop_data(data, diff):
     crop_size = diff//2
     crop = data[crop_size:-crop_size,crop_size:-crop_size,:,:]
@@ -115,7 +115,7 @@ def load_data(path):
     if not label:
         print("No label data detected...")
         return output
-    
+
     for label_name, label_header in hdr_label.items():
         for img_name, img_header in hdr_img.items():
             if img_name not in img_used and round(label_header['pixdim'][3],1) == round(img_header['pixdim'][3],1) \
@@ -152,7 +152,7 @@ def load_data(path):
                     #Special Case for HELP-GS223
                     elif '20170803122409' in img_name:
                         output = np.concatenate([output, output_img1], axis = 2)
-                    
+
                 thickness = img_header['pixdim'][3]
                 img_used.append(img_name)
                 print(img_name)
@@ -162,7 +162,7 @@ def load_data(path):
         for img_name, img_header in hdr_img.items():
             if img[img_name].shape[2] > 2 and img_name not in img_used:
                 img_resample = resample(img[img_name], img_header)
-                seg = np.zeros_like(img_resample) 
+                seg = np.zeros_like(img_resample)
                 output_add = np.stack([img_resample, seg],axis=-1)
                 #Crop to match the shape
                 if output_add.shape[1] != output_add.shape[0]:
@@ -182,7 +182,7 @@ def load_data(path):
                 elif img_header['pixdim'][3] == thickness and output_add.shape[2]!= output_img1.shape[2]:
                     output = np.concatenate([output, output_add], axis = 2)
                     break
-    return output.astype(np.int16)
+    return output.astype(np.float32)
 
 
 '''
