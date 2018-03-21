@@ -4,12 +4,14 @@ import tensorflow as tf
 from model import IR_trim
 from utils import read_records
 import logging, os
+from datetime import datetime
 
-# logging.basicConfig(format='%(module)s.%(funcName)s %(lineno)d:%(message)s', level=logging.INFO)
-# logger = logging.getLogger(__name__)
+timeNow = substr(' ','_',str(datetime.now())[:-10])
+logging.basicConfig(format='%(message)s',filename='logger{}_{}.log'.format(subpath1,timeNow),filemode='w',level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-IMG_SIZE_PX = 136
-SLICE_COUNT = 18
+IMG_SIZE_PX = 115
+SLICE_COUNT = 22
 batch_size = 5
 
 filepath = '../data/cropped'
@@ -67,6 +69,9 @@ def train(x, num_epochs = 10):
         test_acc = accuracy.eval({x:[i[0] for i in test_data], y:[i[1] for i in test_data]})
         print('Best Val Accuracy:',best_valid_acc)
         print('Test Accuracy:',test_acc)
+        logging.info('----- SaveModel -----')
+        logging.info('best val accuracy : {}'.format(best_valid_acc) )
+        logging.info('test accuracy : {}'.format(test_acc) )
 
 if __name__ == '__main__':
     # with tf.Graph().as_default():
