@@ -1,7 +1,6 @@
 import tensorflow as tf
 import numpy as np
 
-
 def conv3d(inputs, num_features, kernel_shape, stride=1, activation_fn=tf.nn.relu, scope=None, padding='SAME'):
     """
     input : n,d,h,w,channels
@@ -9,9 +8,11 @@ def conv3d(inputs, num_features, kernel_shape, stride=1, activation_fn=tf.nn.rel
     """
     channels = inputs.get_shape()[4].value
     filter_shape = kernel_shape + [channels, num_features]
+    regularizer = tf.contrib.layers.l2_regularizer(scale=0.1)
     with tf.variable_scope(scope):
-        kernel = tf.get_variable(scope+'weights',filter_shape,
-                                 initializer=tf.random_normal_initializer(stddev=0.1),dtype=np.float32)
+        kernel = tf.get_variable(scope+'weights',filter_shape,dtype=np.float32,
+                                 initializer=tf.random_normal_initializer(stddev=0.1),
+                                 regularizer = regularizer)
         biases = tf.get_variable(scope+'bias', [num_features],
                                initializer=tf.constant_initializer(0.0),dtype=np.float32)
         conv = tf.nn.conv3d(inputs, kernel, [1,stride,stride,stride,1], padding=padding)
@@ -92,7 +93,7 @@ def block17(net, scale=1.0, activation_fn=tf.nn.relu, scope=None, reuse=None):
 #         self.reuse = reuse
 
 def IR_trim(inputs, nclass=2,
-            dropout_keep_prob=0.8,
+            dropout_keep_prob=0.5,
             reuse=None,
             scope='InceptionResNet_trim',
             activation_fn=tf.nn.relu,
@@ -100,7 +101,7 @@ def IR_trim(inputs, nclass=2,
             padding = 'SAME'):
     with tf.variable_scope(scope, reuse=reuse):
         #Stem
-        IMG_SIZE_PX = 128
+        IMG_SIZE_PX = 133
         SLICE_COUNT = 18
         inputs = tf.reshape(inputs, shape=[-1, SLICE_COUNT, IMG_SIZE_PX, IMG_SIZE_PX, 1])
         net = conv3d(inputs, 32, [3,3,3], stride=2, scope='Conv3d_1a_3x3')
