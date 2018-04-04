@@ -1,3 +1,6 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
 import nibabel as nib
 import glob
 import numpy as np
@@ -7,8 +10,23 @@ import os
 import matplotlib.pyplot as plt
 import scipy.ndimage
 import shutil
+from functools import reduce
 
-def resample(image, header, new_spacing=[1,1,5]):
+
+def plot_img(data, dim=3):
+    fig = plt.figure()
+    for num in range(data.shape[0]):
+        y = fig.add_subplot(5,data.shape[0]//5+1,num+1)
+        if dim == 3:
+            y.imshow(data[num,:,:], cmap=plt.cm.gray)
+        elif dim == 4:
+            y.imshow(data[:,:,num,0], cmap=plt.cm.gray)
+    #     y.imshow(output[:,:,num,1], cmap=plt.cm.gray)
+    plt.show()
+
+
+
+def resample(image, header, new_spacing=[0.8,0.8,5]):
     # Determine current pixel spacing
     spacing = np.array(header['pixdim'][1:4], dtype=np.float32)
     resize_factor = spacing / new_spacing
@@ -20,15 +38,6 @@ def resample(image, header, new_spacing=[1,1,5]):
     image = scipy.ndimage.interpolation.zoom(image, real_resize_factor, mode='nearest')
 
     return image
-
-#Get list of patients under input folder:
-def get_patients(path):
-    patients = os.listdir(path)
-    for p in patients:
-        if p.startswith('.'):
-            patients.remove(p)
-    patients.sort()
-    return patients
 
 # get all the patient folders under the root directory
 def get_folders(path):
@@ -44,17 +53,45 @@ def get_folders(path):
 # Load the scans in given folder path
 def load_scan(path):
     series_count = {}
-    slices = [dicom.read_file(path + '/' + s) for s in os.listdir(path) if '.' not in s]
+    slices = [dicom.read_file(path + '/' + s) for s in os.listdir(path) if '.' not in s or '.dcm' in s]
     for s in slices:
         if s.SeriesNumber not in series_count.keys():
             series_count[s.SeriesNumber] = 1
         else:
             series_count[s.SeriesNumber] += 1
-    for s in slices:
-        if series_count[s.SeriesNumber] < 2:
-            slices.remove(s)
+
+    #Remove irrelevant series        
+    slices = [s for s in slices if s.SeriesNumber<10 and series_count[s.SeriesNumber] > 2 and hasattr(s,'ImagePositionPatient')]
+    #Sort slices by z-position
+    slices.sort(key = lambda x: float(x.ImagePositionPatient[2]))
+    threshold_l, threshold_h = 2, 12
+    slices = reduce(lambda x, y: x + [y] if len(x) == 0 or threshold_l < (y.ImagePositionPatient[2] - x[-1].ImagePositionPatient[2]) < threshold_h else x, slices, [])
+
     return slices
 
+def get_pixels_hu(slices):
+    image = np.stack([s.pixel_array for s in slices])
+    # Convert to int16 (from sometimes int16), 
+    # should be possible as values should always be low enough (<32k)
+    image = image.astype(np.int16)
+
+    # Set outside-of-scan pixels to 0
+    # The intercept is usually -1024, so air is approximately 0
+    image[image == -2000] = 0
+    
+    # Convert to Hounsfield units (HU)
+    for slice_number in range(len(slices)):
+        
+        intercept = slices[slice_number].RescaleIntercept
+        slope = slices[slice_number].RescaleSlope
+        
+        if slope != 1:
+            image[slice_number] = slope * image[slice_number].astype(np.float64)
+            image[slice_number] = image[slice_number].astype(np.int16)
+            
+        image[slice_number] += np.int16(intercept)
+    
+    return np.array(image, dtype=np.int16)
 
 # check if slices are nameless
 def nameless(slices):
@@ -72,19 +109,18 @@ def get_baselines(path):
     for f in folders:
         if 'baseline' in f:
             baselines.append(f)
-    #         if 'fixed' in f:
-    #             try:
-    #                 baselines.remove(f.replace('_fixed',''))
-    #                 baselines.remove(f)
-    #             except:
-    #                 baselines.remove(f)
-    # for f in folders:
-    #     if '24hNCCT_fixed' in f:
-    #         try:
-    #             baselines.remove(f.replace('24hNCCT_fixed','baselineNCCT'))
-    #         except:
-    #             pass
     return baselines
+
+def get_24h(path):
+    #Get baseline folders with excluding patients needed for relabelling
+    folders = get_folders(path)
+    baselines = []
+    folders.sort()
+    for f in folders:
+        if '24h' in f:
+            baselines.append(f)
+    return baselines
+
 
 def crop_data(data, diff):
     crop_size = diff//2
@@ -93,6 +129,8 @@ def crop_data(data, diff):
         crop = crop[0:-1,0:-1,:,:]
     return crop
 
+
+#Legacy function for data loading
 def load_data(path):
     output = np.array([])
     img = {}
@@ -115,7 +153,7 @@ def load_data(path):
     if not label:
         print("No label data detected...")
         return output
-
+    
     for label_name, label_header in hdr_label.items():
         for img_name, img_header in hdr_img.items():
             if img_name not in img_used and round(label_header['pixdim'][3],1) == round(img_header['pixdim'][3],1) \
@@ -152,7 +190,7 @@ def load_data(path):
                     #Special Case for HELP-GS223
                     elif '20170803122409' in img_name:
                         output = np.concatenate([output, output_img1], axis = 2)
-
+                    
                 thickness = img_header['pixdim'][3]
                 img_used.append(img_name)
                 print(img_name)
@@ -162,7 +200,7 @@ def load_data(path):
         for img_name, img_header in hdr_img.items():
             if img[img_name].shape[2] > 2 and img_name not in img_used:
                 img_resample = resample(img[img_name], img_header)
-                seg = np.zeros_like(img_resample)
+                seg = np.zeros_like(img_resample) 
                 output_add = np.stack([img_resample, seg],axis=-1)
                 #Crop to match the shape
                 if output_add.shape[1] != output_add.shape[0]:
@@ -247,27 +285,25 @@ def resize_data(dataset, patients):
     for data in dataset:
         print(data.shape)
 
-# pad the images or masks to the dismension of 180*180
-def pad_data(dataset, image = True):
+# pad the images or masks to the dismension
+def pad_data(data, image = True, target_size = 320):
     if image: constant_value = -1024
     else: constant_value = 0
-    padded_data = []
-    for data in dataset:
-        original_size = data.shape[0]
-        if original_size == 180:
-            padded_data.append(data)
-        elif original_size != 180:
-            if original_size % 2 == 0:
-                pad_size = (180 - original_size)//2
-                pad_config = ((pad_size,pad_size), (pad_size,pad_size), (0,0))
-                data = np.pad(data, pad_config, 'constant', constant_values=constant_value)
-                padded_data.append(data)
-            else:
-                pad1 = (180 - original_size)//2
-                pad2 = pad1 + 1
-                pad_config = ((pad1, pad2), (pad1, pad2), (0,0))
-                data = np.pad(data, pad_config, 'constant', constant_values=constant_value)
-                padded_data.append(data)
+    original_size = data.shape[0]
+    if original_size == target_size:
+        padded_data = data
+    elif original_size != target_size:
+        if original_size % 2 == 0:
+            pad_size = (target_size - original_size)//2
+            pad_config = ((pad_size,pad_size), (pad_size,pad_size), (0,0))
+            data = np.pad(data, pad_config, 'constant', constant_values=constant_value)
+            padded_data = data
+        else:
+            pad1 = (target_size - original_size)//2
+            pad2 = pad1 + 1
+            pad_config = ((pad1, pad2), (pad1, pad2), (0,0))
+            data = np.pad(data, pad_config, 'constant', constant_values=constant_value)
+            padded_data = data 
     return padded_data
 
 #pad both the images and masks in the dataset
@@ -317,6 +353,8 @@ def crop_actual_size(dataset, margin=5):
         print(i, 'th')
         images = data[:,:,:,0]
         masks = data[:,:,:,1]
+        #keep area with mask only
+        images[masks==0] = 0
         u, d, l, r, t, b = get_boundary(masks)
         print(u, d, l, r, t, b)
         print(masks.shape)
@@ -473,7 +511,7 @@ def calculate_pad(x, mx):
         return pad1, pad2
 
 def pad_cropped(dataset):
-    mx, my, mz = 115, 115, 22
+    mx, my, mz = 0, 0, 0
     for data in dataset:
         x, y, z = data.shape
         mx = max(mx, x)
