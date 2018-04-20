@@ -39,6 +39,16 @@ def resample(image, header, new_spacing=[0.8,0.8,5]):
 
     return image
 
+def cal_volume(mask, spacing):
+    """
+    Args:
+        mask: numpy array [depth, height, width]
+        spacing: list [x, y, z]
+    """
+    count = mask.sum()
+    cubicMMPerVoxel = reduce(lambda x,y: x*y, spacing)
+    return count*cubicMMPerVoxel/1000
+    
 # get all the patient folders under the root directory
 def get_folders(path):
     patients = [os.path.join(path, p) for p in os.listdir(path) if '.' not in p]
@@ -59,9 +69,9 @@ def load_scan(path):
             series_count[s.SeriesNumber] = 1
         else:
             series_count[s.SeriesNumber] += 1
-
     #Remove irrelevant series        
     slices = [s for s in slices if s.SeriesNumber<10 and series_count[s.SeriesNumber] > 2 and hasattr(s,'ImagePositionPatient')]
+
     #Sort slices by z-position
     slices.sort(key = lambda x: float(x.ImagePositionPatient[2]))
     threshold_l, threshold_h = 2, 12
@@ -124,9 +134,9 @@ def get_24h(path):
 
 def crop_data(data, diff):
     crop_size = diff//2
-    crop = data[crop_size:-crop_size,crop_size:-crop_size,:,:]
+    crop = data[crop_size:-crop_size,crop_size:-crop_size,:]
     if diff%2 !=0:
-        crop = crop[0:-1,0:-1,:,:]
+        crop = crop[0:-1,0:-1,:]
     return crop
 
 
