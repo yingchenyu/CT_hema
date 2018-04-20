@@ -12,8 +12,9 @@ from functools import reduce
 from collections import Counter
 import cv2
 import imutils
+import SimpleITK as sitk
 
-def resample_nii(images, header, new_spacing=[5,0.8,0.8]):
+def resample_nii(images, header, new_spacing=[1,1,1]):
     #4-D images, resample all channels
     # Determine current pixel spacing
     re_images = []
@@ -31,7 +32,7 @@ def resample_nii(images, header, new_spacing=[5,0.8,0.8]):
     return re_images
 
 
-def resample_dicom(images, Slice, new_spacing=[5,0.8,0.8]):
+def resample_dicom(images, Slice, new_spacing=[1,1,1]):
     #4-D images, resample all channels
     # Determine current pixel spacing
     re_images = []
@@ -142,12 +143,11 @@ def rotateZ(image):
             elif abs(mean_angle-angle) <30 and ma-MA > 30.0:
                 mean_angle = (count_angle*mean_angle + angle) /(count_angle+1)
                 count_angle += 1
-            #Exclue last 5 images
-            elif ma-MA <= 25.0:
+            elif ma-MA <= 30.0:
                 count_angle += 1
             else:
                 #Guardband random rotation due to wrong calculated direction
-                if count_angle > 5:
+                if count_angle > 7:
                     print('apply mean angle',mean_angle)
                     output[i-count_angle:i] = scipy.ndimage.rotate(image[i-count_angle:i], mean_angle, reshape=False, 
                                                                    axes=(1,2), mode='nearest')
@@ -155,20 +155,21 @@ def rotateZ(image):
                 count_angle = 1
         else:
             count_angle += 1
-    if count_angle > 5:
+    if count_angle > 7:
         print('apply mean angle',mean_angle)
         output[-count_angle:] = scipy.ndimage.rotate(image[-count_angle:], mean_angle, reshape=False, 
                                                      axes=(1,2), mode='nearest')
 
     return output
 
-def load_data_dicom(path):
+def load_data_dicom(path, resample = True, new_spacing=[1,1,1]):
+    print('Loading data from dicom files...')
     slices = load_scan(path)
     #Store thickness and position info
     thickness = Counter([s.SliceThickness for s in slices])
     z_pos = [s.ImagePositionPatient[2] for s in slices]
-    print(thickness)
-    print(z_pos)
+    # print(thickness)
+    # print(z_pos)
     #Convert slices into image matrix
     image = get_pixels_hu(slices)
     image = match_hw(image)
@@ -181,19 +182,19 @@ def load_data_dicom(path):
     if not label_nii: 
         print("No label data detected...")
         return np.array([])
-    print(label_nii)
+    # print(label_nii)
     for label_path in label_nii:
         label_file = nib.load(label_path)
         label = match_hw(label_file.get_data())
         #Rotate 90 as NIFTI uses RAI but dicom uses RPI orientation
         label = np.transpose(np.rot90(label),[2,0,1])
         label_pos = label_file.header['qoffset_z']
-        print(label_pos)
+        # print(label_pos)
         label_index = find_index_around(z_pos, label_pos)
-        print('Insert in to postition: ', label_index)
+        # print('Insert in to postition: ', label_index)
         output[label_index:label_index+label.shape[0],:,:,1] = label
 
-    print('before resampling: ', output.shape)
+    # print('before resampling: ', output.shape)
 #     plot_img(normalize(output[:,:,:,0]))
 #     plot_img(output[:,:,:,1])
     #Centralize images (grouped)
@@ -202,18 +203,19 @@ def load_data_dicom(path):
     output = rotateZ(output)
     #Resampling
     #Assume only two thickness
-    if len(thickness.keys())>2:
-        print('More than two thickness')
-    elif len(thickness.keys())==2:
-        for t, t_count in thickness.items():
-            if t == slices[0].SliceThickness:
-                part1 = resample_dicom(output[0:t_count],slices[0])
-            elif t == slices[-1].SliceThickness:
-                part2 = resample_dicom(output[-t_count-1:-1],slices[-1])
-        part1, part2 = match_size(part1, part2)
-        output = np.concatenate([part1,part2],axis=0)
-    else:
-        output = resample_dicom(output,slices[0])
+    if resample:
+        if len(thickness.keys())>2:
+            print('More than two thickness')
+        elif len(thickness.keys())==2:
+            for t, t_count in thickness.items():
+                if t == slices[0].SliceThickness:
+                    part1 = resample_dicom(output[0:t_count],slices[0], new_spacing)
+                elif t == slices[-1].SliceThickness:
+                    part2 = resample_dicom(output[-t_count-1:-1],slices[-1], new_spacing)
+            part1, part2 = match_size(part1, part2)
+            output = np.concatenate([part1,part2],axis=0)
+        else:
+            output = resample_dicom(output,slices[0], new_spacing)
         
 #     plot_img(normalize(output[:,:,:,0]))
 #     plot_img(output[:,:,:,1])
@@ -221,7 +223,8 @@ def load_data_dicom(path):
     print(output.shape)
     return output.astype(np.float32)   
 
-def load_data_nii(path):
+def load_data_nii(path, resample = True, new_spacing=[1,1,1]):
+    print('Loading data from nii files...')
     #Backup for load_data_dicom, may not be able to handle all situation
     output = np.array([])
     images = []
@@ -249,6 +252,7 @@ def load_data_nii(path):
     label_id = 0
     for i, image in enumerate(images):
         img, img_hdr = image.get_data(), image.header
+        img[img<-1024] = -1024
         if len(labels) > label_id:
             label, label_hdr = labels[label_id].get_data(), labels[label_id].header
         
@@ -278,18 +282,19 @@ def load_data_nii(path):
     output = rotateZ(output)
     
     #Resampling
-    start_id = 0
-    for i, image in enumerate(images):
-        img, img_hdr = image.get_data(), image.header
-        part = resample_nii(output[start_id:start_id+img.shape[2]], img_hdr)
-        start_id = img.shape[2]
-        if i == 0:
-            output_rs = part
-        else:
-            output_rs, part = match_size(output_rs, part)
-            output_rs = np.concatenate([output_rs,part],axis=0)
-    print(output_rs.shape)
-#     plot_img(normalize(output_rs[:,:,:,0]))
-#     plot_img(output_rs[:,:,:,1])
-    return output_rs.astype(np.float32)
+    if resample:
+        start_id = 0
+        for i, image in enumerate(images):
+            img, img_hdr = image.get_data(), image.header
+            part = resample_nii(output[start_id:start_id+img.shape[2]], img_hdr,)
+            start_id = img.shape[2]
+            if i == 0:
+                output_rs = part
+            else:
+                output_rs, part = match_size(output_rs, part)
+                output_rs = np.concatenate([output_rs,part],axis=0)
+        print(output_rs.shape)
+    #     plot_img(normalize(output_rs[:,:,:,0]))
+    #     plot_img(output_rs[:,:,:,1])
+        return output_rs.astype(np.float32)
 
